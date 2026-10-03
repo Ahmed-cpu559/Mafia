@@ -138,6 +138,28 @@ export function renderSetup(container, app) {
             { value: GameMode.AUTOMATED, label: t('⚡ Automated'), desc: t('The system automatically advances phases when timers expire.') },
           ], s.gameMode)}
         </div>
+        
+        <div class="setup__section">
+          <h2 class="setup__section-title">🧠 ${t('Awareness Modes')}</h2>
+          
+          <h3 class="text-sm font-weight:600 mb-2 mt-4">${t('🔪 Mafia Awareness')}</h3>
+          ${renderRadioGroup('mafiaAwareness', [
+            { value: AwarenessMode.GROUP, label: 'Group (Teammates know each other)', desc: '' },
+            { value: AwarenessMode.INDIVIDUAL, label: 'Individual (Blind)', desc: '' },
+          ], s.mafiaAwareness)}
+
+          <h3 class="text-sm font-weight:600 mb-2 mt-4">${t('💊 Doctor Awareness')}</h3>
+          ${renderRadioGroup('doctorAwareness', [
+            { value: AwarenessMode.GROUP, label: 'Group (Teammates know each other)', desc: '' },
+            { value: AwarenessMode.INDIVIDUAL, label: 'Individual (Blind)', desc: '' },
+          ], s.doctorAwareness)}
+
+          <h3 class="text-sm font-weight:600 mb-2 mt-4">${t('🔍 Officer Awareness')}</h3>
+          ${renderRadioGroup('officerAwareness', [
+            { value: AwarenessMode.GROUP, label: 'Group (Teammates know each other)', desc: '' },
+            { value: AwarenessMode.INDIVIDUAL, label: 'Individual (Blind)', desc: '' },
+          ], s.officerAwareness)}
+        </div>
 
         <div class="setup__section text-center">
           <button class="btn btn--primary btn--lg btn--block" onclick="window._startGame()" ${!isValid ? 'disabled' : ''}>

@@ -40,7 +40,15 @@ class App {
 
     this.socket.on('stateUpdate', (state) => {
       this.gameState = state;
-      // Chat messages usually need to be appended. If state brings full history, cool.
+      
+      // If game was cancelled, Sage goes back to setup automatically.
+      // Players stay on the game screen to see "Game Cancelled" and click "Leave Room"
+      if (state.phase === 'LOBBY' && this.screen === 'game') {
+        if (state.sageId === sessionStorage.getItem('mafia_session_token')) {
+          this.screen = 'setup';
+        }
+      }
+      
       this.render();
     });
 

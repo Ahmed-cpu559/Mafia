@@ -162,19 +162,21 @@ io.on('connection', (socket) => {
 
     try {
       const msgDTO = game.sendChat(playerId, channel, message);
-      if (!msgDTO) return; // Unauthorized handled by engine returning null
+      if (!msgDTO || !msgDTO.success) {
+        if (callback) callback(msgDTO || { success: false, error: 'Unauthorized' });
+        return;
+      }
       
       // Determine who gets the message based on channel
-      // For simplicity, we can emit it to the room, and the client filters, 
-      // BUT for security, we should only emit to authorized sockets.
-      // We will iterate sockets in room.
       const sockets = io.sockets.adapter.rooms.get(game.code);
       if (sockets) {
         for (const sid of sockets) {
           const clientSocket = io.sockets.sockets.get(sid);
+          if (!clientSocket) continue;
           const cPlayerId = clientSocket.data.playerId;
-          if (game.canAccessChat(cPlayerId, channel)) {
-            clientSocket.emit('chatMessage', msgDTO);
+          // Sage doesn't have a player ID, but should see all chat
+          if (cPlayerId === game.sageId || game.canReadChannel(game.getPlayer(cPlayerId), channel)) {
+            clientSocket.emit('chatMessage', msgDTO.message);
           }
         }
       }
@@ -197,10 +199,26 @@ io.on('connection', (socket) => {
 
     try {
       if (command.type === 'START_GAME') {
-        // setup was split. We set config, then assignRoles, then startGame
-        game.gameMode = command.payload.gameMode;
-        game.config = command.payload.config;
-        game.assignRoles(command.payload.roleCounts);
+        const payload = command.payload;
+        game.gameMode = payload.gameMode;
+        
+        // Update awareness
+        if (payload.config.mafiaAwareness) game.mafiaAwareness = payload.config.mafiaAwareness;
+        if (payload.config.doctorAwareness) game.doctorAwareness = payload.config.doctorAwareness;
+        if (payload.config.officerAwareness) game.officerAwareness = payload.config.officerAwareness;
+        
+        // Update default config for timers and counts
+        game.updateDefaultConfig({
+          mafiaKillCount: payload.config.mafiaKillCount,
+          doctorHealCount: payload.config.doctorHealCount,
+          mafiaTimerSeconds: payload.config.timers.NIGHT_MAFIA,
+          doctorTimerSeconds: payload.config.timers.NIGHT_DOCTOR,
+          officerTimerSeconds: payload.config.timers.NIGHT_OFFICER,
+          discussionTimerSeconds: payload.config.timers.DISCUSSION,
+          votingTimerSeconds: payload.config.timers.VOTING,
+        });
+
+        game.assignRoles(payload.roleCounts);
         game.startGame();
       } else if (command.type === 'ADVANCE_PHASE') {
         game.advancePhase();
@@ -210,6 +228,12 @@ io.on('connection', (socket) => {
         game.devRevealInvestigation(command.payload.targetId);
       } else if (command.type === 'SET_WINNER') {
         game.devSetWinner(command.payload.team);
+      } else if (command.type === 'ANNOUNCE') {
+        game.createAnnouncement(command.payload.text);
+      } else if (command.type === 'UPDATE_CONFIG') {
+        game.updateRoundConfig(command.payload);
+      } else if (command.type === 'CANCEL_GAME') {
+        game.cancelGame();
       }
 
       if (callback) callback({ success: true });

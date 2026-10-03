@@ -124,8 +124,8 @@ export function renderChat(messages, options = {}) {
       <div class="chat__messages" id="chat-messages">${msgHtml}</div>
       ${canSend ? `
         <div class="chat__input-row">
-          <input type="text" class="chat__input" id="${inputId}" placeholder="${t('Type a message...')}" />
-          <button class="chat__send" ${onSend ? `onclick="${onSend}"` : ''}>${t('Send')}</button>
+          <input type="text" class="chat__input" id="${inputId}" placeholder="${t('Type a message...')}" ${onSend ? `onkeypress="if(event.key==='Enter') ${onSend.replace(/"/g, '&quot;')}"` : ''} />
+          <button class="chat__send" ${onSend ? `onclick="${onSend.replace(/"/g, '&quot;')}"` : ''}>${t('Send')}</button>
         </div>
       ` : ''}
     </div>
@@ -194,7 +194,7 @@ export function renderDevControls(buttons) {
       <div class="dev-controls__title">🛠️ DEV / DEMO CONTROLS</div>
       <div class="dev-controls__grid">
         ${buttons.map(b => `
-          <button class="btn btn--ghost btn--sm" onclick="${b.action}" ${b.disabled ? 'disabled' : ''}>
+          <button class="btn btn--ghost btn--sm" onclick="${(b.action || '').replace(/"/g, '&quot;')}" ${b.disabled ? 'disabled' : ''}>
             ${b.icon || ''} ${b.label}
           </button>
         `).join('')}
@@ -212,7 +212,7 @@ export function renderAnnouncementComposer(presets = []) {
     <div class="composer">
       <div class="composer__presets">
         ${presets.map((p, i) => `
-          <button class="composer__preset" onclick="window._setAnnouncement('${escapeHtml(p)}')">${p}</button>
+          <button class="composer__preset" onclick="window._setAnnouncement('${escapeHtml(p).replace(/'/g, "\\'")}')">${p}</button>
         `).join('')}
       </div>
       <textarea class="composer__textarea" id="announcement-text" placeholder="Write an announcement..."></textarea>

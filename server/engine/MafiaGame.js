@@ -211,6 +211,26 @@ export class MafiaGame {
     this._notify();
   }
 
+  cancelGame() {
+    this.phase = GamePhase.LOBBY;
+    this.currentRound = 0;
+    this.currentRoundData = null;
+    this.chatMessages = { PUBLIC: [], MAFIA: [], DEAD: [] };
+    this.announcements = [];
+    this.winner = null;
+    this._stopTimer();
+    
+    // Reset all players
+    for (const p of this.players) {
+      p.role = null;
+      p.team = null;
+      p.isAlive = true;
+      p.deathCause = null;
+      p.deathRound = null;
+    }
+    this._notify();
+  }
+
   /* ═══════════════════════════════════════════════════
      ROUND MANAGEMENT
      ═══════════════════════════════════════════════════ */
@@ -708,6 +728,8 @@ export class MafiaGame {
       } else {
         isTie = true;
       }
+    } else {
+      isTie = true;
     }
 
     this.currentRoundData.voteResult = {
@@ -787,8 +809,7 @@ export class MafiaGame {
       timestamp: Date.now(),
     };
     this.chatMessages[channel].push(msg);
-    this._notify();
-    return { success: true };
+    return { success: true, message: msg };
   }
 
   _canUseChannel(player, channel) {
@@ -807,6 +828,23 @@ export class MafiaGame {
         this.phase === GamePhase.NIGHT_MAFIA;
     }
     if (channel === ChatChannel.DEAD) {
+      return !player.isAlive;
+    }
+    return false;
+  }
+  
+  canReadChannel(player, channel) {
+    if (!player) return false;
+    if (channel === ChatChannel.PUBLIC) {
+      // Everyone can read public chat (alive or dead, at any time)
+      return true;
+    }
+    if (channel === ChatChannel.MAFIA) {
+      // Only mafia can read mafia chat
+      return player.role === Role.MAFIA;
+    }
+    if (channel === ChatChannel.DEAD) {
+      // Only dead can read dead chat
       return !player.isAlive;
     }
     return false;
@@ -859,6 +897,7 @@ export class MafiaGame {
       state.votes = this.currentRoundData?.votes || [];
       state.mafiaCount = this.getMafiaCount();
       state.villageCount = this.getVillageCount();
+      state.chatMessages = this.chatMessages;
       return state;
     }
 
@@ -871,6 +910,15 @@ export class MafiaGame {
     state.myRole = player.role;
     state.myTeam = player.team;
     state.isAlive = player.isAlive;
+    
+    // Send filtered chat messages based on privacy
+    state.chatMessages = { PUBLIC: this.chatMessages.PUBLIC || [] };
+    if (player.role === Role.MAFIA) {
+      state.chatMessages.MAFIA = this.chatMessages.MAFIA || [];
+    }
+    if (!player.isAlive) {
+      state.chatMessages.DEAD = this.chatMessages.DEAD || [];
+    }
 
     // Build player list (what this player can see)
     state.players = this.players.filter(p => p.id !== this.sageId).map(p => {

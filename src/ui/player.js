@@ -55,6 +55,10 @@ export function renderPlayerView(app) {
       content = renderGameOver(state);
       break;
       
+    case GamePhase.LOBBY:
+      content = renderWaiting(state, t('Game Cancelled'), t('The Sage has cancelled the game. You can leave the room.'));
+      break;
+      
     default:
       content = renderWaiting(state, t('Waiting...'), t('The game will begin shortly.'));
   }
@@ -81,8 +85,11 @@ function renderPlayerHeader(state) {
           <div class="mt-1">${renderRoleBadge(state.myRole)}</div>
         </div>
       </div>
-      <div class="text-right">
+      <div class="text-right flex items-center gap-2">
         ${state.phase !== GamePhase.FINISHED && state.phase !== GamePhase.ROLE_ASSIGNMENT ? renderTimer('') : ''}
+        <button class="btn btn--ghost p-2 text-muted hover-danger" onclick="if(confirm('Are you sure you want to leave the game?')) window._exitGame()" title="Leave Room">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+        </button>
       </div>
     </div>
   `;
@@ -374,13 +381,15 @@ function renderGameOver(state) {
         ${isMyTeam ? 'Congratulations! Your team emerged victorious.' : 'Better luck next time...'}
       </div>
       
-      <div class="card" style="width:100%; max-width:600px; text-align:left">
+      <div class="card" style="width:100%; max-width:600px; text-align:left; margin-bottom: 2rem;">
         <h3 class="text-lg font-weight:700 mb-4 text-center">Final Roles</h3>
         <div class="player-grid">
           ${state.players.map(p => renderPlayerCard(p, { showRole: true, showStatus: true })).join('')}
           ${renderPlayerCard({id:state.myId, name:state.myName+' (You)', role:state.myRole, isAlive:state.isAlive}, { showRole: true, showStatus: true })}
         </div>
       </div>
+      
+      <button class="btn btn--ghost text-muted hover-danger" onclick="if(confirm('Leave the room?')) window._exitGame()">⬅️ Leave Room</button>
     </div>
   `;
 }
@@ -419,6 +428,7 @@ function renderDeadPlayerView(app, state) {
 }
 
 function renderWaiting(state, title, subtitle) {
+  const isLobby = state.phase === GamePhase.LOBBY;
   return `
     <div class="waiting fade-in">
       <div class="waiting__moon">${state.phase.includes('NIGHT') ? '🌙' : '⏳'}</div>
@@ -429,6 +439,7 @@ function renderWaiting(state, title, subtitle) {
         <div class="waiting__dot"></div>
         <div class="waiting__dot"></div>
       </div>
+      ${isLobby ? `<div class="mt-8"><button class="btn btn--ghost" onclick="window._exitGame()">⬅️ Leave Room</button></div>` : ''}
     </div>
   `;
 }

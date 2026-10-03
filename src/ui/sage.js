@@ -300,7 +300,43 @@ function renderSageControls(app, state) {
     { label: 'Reset Round ⏪', action: 'window._sageResetRound()', disabled: state.phase === GamePhase.FINISHED },
     { label: 'Force Village Win 🏆', action: 'window._sageForceWin("VILLAGE")', disabled: state.phase === GamePhase.FINISHED },
     { label: 'Force Mafia Win 🏆', action: 'window._sageForceWin("MAFIA")', disabled: state.phase === GamePhase.FINISHED },
+    { label: 'Cancel Game 🛑', action: 'window._sageCancelGame()', disabled: false },
   ];
 
-  return renderDevControls(buttons);
+  const configSection = state.phase !== GamePhase.FINISHED ? `
+    <div class="sage-panel mt-4">
+      <div class="sage-panel__header">⚙️ Dynamic Round Configuration</div>
+      <div class="sage-panel__body">
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+          <div class="form-group" style="flex: 1; min-width: 120px;">
+            <label class="form-label">🔪 Mafia Kills</label>
+            <div class="number-input">
+              <button class="number-input__btn" onclick="window._sageUpdateConfig('mafiaKillCount', -1)" ${state.config.mafiaKillCount <= 0 ? 'disabled' : ''}>−</button>
+              <input type="text" class="number-input__value" value="${state.config.mafiaKillCount}" readonly />
+              <button class="number-input__btn" onclick="window._sageUpdateConfig('mafiaKillCount', 1)">+</button>
+            </div>
+          </div>
+          <div class="form-group" style="flex: 1; min-width: 120px;">
+            <label class="form-label">💊 Doctor Heals</label>
+            <div class="number-input">
+              <button class="number-input__btn" onclick="window._sageUpdateConfig('doctorHealCount', -1)" ${state.config.doctorHealCount <= 0 ? 'disabled' : ''}>−</button>
+              <input type="text" class="number-input__value" value="${state.config.doctorHealCount}" readonly />
+              <button class="number-input__btn" onclick="window._sageUpdateConfig('doctorHealCount', 1)">+</button>
+            </div>
+          </div>
+          <div class="form-group" style="flex: 1; min-width: 120px;">
+            <label class="form-label">🔍 Officer Invs</label>
+            <div class="number-input">
+              <button class="number-input__btn" onclick="window._sageUpdateConfig('officerInvestigateCount', -1)" ${state.config.officerInvestigateCount <= 0 ? 'disabled' : ''}>−</button>
+              <input type="text" class="number-input__value" value="${state.config.officerInvestigateCount}" readonly />
+              <button class="number-input__btn" onclick="window._sageUpdateConfig('officerInvestigateCount', 1)">+</button>
+            </div>
+          </div>
+        </div>
+        <div class="text-xs text-muted mt-3">Changes apply immediately to the current round.</div>
+      </div>
+    </div>
+  ` : '';
+
+  return configSection + renderDevControls(buttons);
 }

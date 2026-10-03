@@ -56,7 +56,11 @@ window._exitGame = () => {
     const app = window.__MAFIA_APP__;
     const sel = app.selectedTargets || [];
     if (sel.length === 0) return;
-    app.socket.emit('playerAction', { type, targetIds: sel });
+    app.socket.emit('playerAction', { type, targetIds: sel }, (res) => {
+      if (!res.success) {
+        alert(res.error || 'Invalid action');
+      }
+    });
     app.selectedTargets = [];
   };
 
@@ -124,4 +128,18 @@ window._exitGame = () => {
     if (!ta || !ta.value.trim()) return;
     app.socket.emit('sageCommand', { type: 'ANNOUNCE', payload: { text: ta.value.trim() } });
     ta.value = '';
+  };
+
+  window._sageUpdateConfig = (key, delta) => {
+    const app = window.__MAFIA_APP__;
+    if (!app.gameState || !app.gameState.config) return;
+    const newVal = app.gameState.config[key] + delta;
+    if (newVal < 0) return;
+    app.socket.emit('sageCommand', { type: 'UPDATE_CONFIG', payload: { [key]: newVal } });
+  };
+
+  window._sageCancelGame = () => {
+    if (confirm('Are you sure you want to cancel the game and return everyone to the lobby?')) {
+      window.__MAFIA_APP__.socket.emit('sageCommand', { type: 'CANCEL_GAME' });
+    }
   };
