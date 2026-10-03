@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Mafia - A social deduction game. Create a game, assign roles, and outsmart your opponents." />
+  <title>Mafia — Social Deduction Game</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/src/styles/index.css" />
+</head>
+<body>
+  <div id="error-overlay" style="display:none; position:fixed; z-index:9999; inset:0; background:rgba(200,0,0,0.9); color:white; padding:20px; font-family:monospace; white-space:pre-wrap; overflow:auto"></div>
+  <script>
+    window.onerror = function(msg, url, line, col, error) {
+      const err = document.getElementById('error-overlay');
+      err.style.display = 'block';
+      err.textContent += msg + '\\n' + (error && error.stack ? error.stack : '') + '\\n\\n';
+    };
+    window.addEventListener('unhandledrejection', function(event) {
+      const err = document.getElementById('error-overlay');
+      err.style.display = 'block';
+      err.textContent += 'Unhandled Promise Rejection: ' + event.reason + '\\n\\n';
+    });
+  </script>
+  <div id="app"></div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
