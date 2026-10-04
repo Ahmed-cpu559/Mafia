@@ -10,6 +10,14 @@ import { GamePhase, ChatChannel } from '../shared/enums.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+import { GlobalError } from './utils/globalError.js';
+import { URL_Error } from './utils/URL_Catch.js';
+import { handleErrorCode, handleRuntimeError, globalRateLimiter } from './utils/outError.js';
+
+// Handle uncaught exceptions and unhandled rejections globally
+process.on('uncaughtException', handleErrorCode);
+process.on('unhandledRejection', handleRuntimeError);
+
 const app = express();
 const httpServer = createServer(app);
 
@@ -22,6 +30,7 @@ const io = new Server(httpServer, {
 });
 
 app.use(cors());
+app.use(globalRateLimiter);
 app.use(express.json());
 
 // API endpoints (if needed for initial config before socket connection)
@@ -290,6 +299,12 @@ app.use(express.static(distPath));
 app.use((req, res) => {
   res.sendFile(path.join(distPath, 'index.html'));
 });
+
+// Handle 404s (URLs not caught by other routes)
+app.all('*', URL_Error);
+
+// Global Error Handler Middleware
+app.use(GlobalError);
 
 httpServer.listen(PORT, () => {
   console.log(`Mafia Server running on port ${PORT}`);
