@@ -92,8 +92,8 @@ export function renderRoleBadge(role) {
 
 export function renderTeamBadge(team) {
   if (!team) return '';
-  const t = team.toLowerCase();
-  return `<span class="team-badge team-badge--${t}">${team}</span>`;
+  const tm = team.toLowerCase();
+  return `<span class="team-badge team-badge--${tm}">${t(team)}</span>`;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -107,10 +107,13 @@ export function renderChat(messages, options = {}) {
     canSend = true,
     onSend = '',
     inputId = 'chat-input',
+    channel = '',
   } = options;
 
+  const currentChannel = channel || (onSend.includes('MAFIA') ? 'MAFIA' : onSend.includes('DEAD') ? 'DEAD' : 'PUBLIC');
+
   const msgHtml = messages.length === 0
-    ? '<div class="text-muted text-sm text-center" style="padding:2rem">No messages yet</div>'
+    ? `<div class="text-muted text-sm text-center" style="padding:2rem">${t('No messages yet')}</div>`
     : messages.map(m => `
       <div class="chat__message">
         <span class="chat__message-sender" style="color:var(--sage)">${m.playerName}:</span>
@@ -120,8 +123,8 @@ export function renderChat(messages, options = {}) {
 
   return `
     <div class="chat">
-      <div class="chat__header">${channelIcon} ${title}</div>
-      <div class="chat__messages" id="chat-messages">${msgHtml}</div>
+      <div class="chat__header">${channelIcon} ${t(title)}</div>
+      <div class="chat__messages" id="chat-messages" data-channel="${currentChannel}">${msgHtml}</div>
       ${canSend ? `
         <div class="chat__input-row">
           <input type="text" class="chat__input" id="${inputId}" placeholder="${t('Type a message...')}" ${onSend ? `onkeypress="if(event.key==='Enter') ${onSend.replace(/"/g, '&quot;')}"` : ''} />
@@ -191,11 +194,11 @@ export function renderRadioGroup(name, options, selectedValue) {
 export function renderDevControls(buttons) {
   return `
     <div class="dev-controls">
-      <div class="dev-controls__title">🛠️ DEV / DEMO CONTROLS</div>
+      <div class="dev-controls__title">🛠️ ${t('DEV / DEMO CONTROLS')}</div>
       <div class="dev-controls__grid">
         ${buttons.map(b => `
           <button class="btn btn--ghost btn--sm" onclick="${(b.action || '').replace(/"/g, '&quot;')}" ${b.disabled ? 'disabled' : ''}>
-            ${b.icon || ''} ${b.label}
+            ${b.icon || ''} ${t(b.label)}
           </button>
         `).join('')}
       </div>
@@ -212,12 +215,12 @@ export function renderAnnouncementComposer(presets = []) {
     <div class="composer">
       <div class="composer__presets">
         ${presets.map((p, i) => `
-          <button class="composer__preset" onclick="window._setAnnouncement('${escapeHtml(p).replace(/'/g, "\\'")}')">${p}</button>
+          <button class="composer__preset" onclick="window._setAnnouncement('${escapeHtml(p).replace(/'/g, "\\'")}')">${t(p)}</button>
         `).join('')}
       </div>
-      <textarea class="composer__textarea" id="announcement-text" placeholder="Write an announcement..."></textarea>
+      <textarea class="composer__textarea" id="announcement-text" placeholder="${t('Write an announcement...')}"></textarea>
       <div class="mt-3">
-        <button class="btn btn--success btn--sm" onclick="window._sendAnnouncement()">📢 Announce</button>
+        <button class="btn btn--success btn--sm" onclick="window._sendAnnouncement()">📢 ${t('Announce')}</button>
       </div>
     </div>
   `;

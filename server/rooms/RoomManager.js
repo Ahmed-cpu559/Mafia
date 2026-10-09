@@ -10,7 +10,7 @@ class RoomManager {
   generateRoomCode() {
     let code;
     do {
-      code = Math.random().toString(36).substring(2, 6).toUpperCase();
+      code = Math.floor(1000 + Math.random() * 9000).toString();
     } while (this.games.has(code));
     return code;
   }
@@ -37,6 +37,18 @@ class RoomManager {
 
   getSession(sessionToken) {
     return this.sessions.get(sessionToken);
+  }
+
+  removeSession(sessionToken) {
+    this.sessions.delete(sessionToken);
+  }
+
+  removeSessionByPlayerId(playerId) {
+    for (const [token, sess] of this.sessions.entries()) {
+      if (sess.playerId === playerId) {
+        this.sessions.delete(token);
+      }
+    }
   }
 }
 

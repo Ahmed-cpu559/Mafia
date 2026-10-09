@@ -23,10 +23,7 @@ export function generateId() {
 }
 
 export function generateGameCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code = '';
-  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
-  return code;
+  return Math.floor(1000 + Math.random() * 9000).toString();
 }
 
 /** Cryptographically-adequate shuffle (Fisher-Yates) */
@@ -77,12 +74,15 @@ export class MafiaGame {
     this.defaultRoundConfig = {
       mafiaKillCount: 1,
       doctorHealCount: 1,
+      officerInvestigateCount: 1,
+      nightTimerSeconds: 60,
       mafiaTimerSeconds: 60,
       doctorTimerSeconds: 30,
       officerTimerSeconds: 30,
       discussionTimerSeconds: 300,
       votingTimerSeconds: 120,
     };
+    this.citizenStats = {};
 
     /* ── Timer ── */
     this.timerRemaining = 0;
@@ -130,8 +130,10 @@ export class MafiaGame {
 
   removePlayer(playerId) {
     if (this.phase !== GamePhase.LOBBY) throw new Error('Can only remove players in LOBBY');
+    if (playerId === this.sageId) return;
     this.players = this.players.filter(p => p.id !== playerId);
     this._emit('PLAYER_REMOVED', { playerId });
+    this._notify();
   }
 
   setSage(playerId) {
@@ -190,6 +192,34 @@ export class MafiaGame {
     this._notify();
   }
 
+  /** Assign specific roles chosen manually by the Sage */
+  assignSpecificRoles(playerRoleMap) {
+    const nonSagePlayers = this.players.filter(p => p.id !== this.sageId);
+    if (nonSagePlayers.length === 0) {
+      throw new Error('No players to assign roles to');
+    }
+
+    const assignedRoles = [];
+    nonSagePlayers.forEach(p => {
+      const role = playerRoleMap[p.id];
+      if (!role) {
+        throw new Error(`Player ${p.name} does not have an assigned role`);
+      }
+      p.role = role;
+      p.team = RoleTeamMap[role];
+      assignedRoles.push(role);
+    });
+
+    const mafiaCount = assignedRoles.filter(r => r === Role.MAFIA).length;
+    if (mafiaCount < 1) {
+      throw new Error('At least 1 Mafia is required');
+    }
+
+    this.phase = GamePhase.ROLE_ASSIGNMENT;
+    this._emit('ROLES_ASSIGNED', { players: nonSagePlayers.map(p => ({ id: p.id, name: p.name, role: p.role })) });
+    this._notify();
+  }
+
   /** Directly set a player's role (for scenarios) */
   setPlayerRole(playerId, role) {
     const p = this.getPlayer(playerId);
@@ -218,6 +248,7 @@ export class MafiaGame {
     this.chatMessages = { PUBLIC: [], MAFIA: [], DEAD: [] };
     this.announcements = [];
     this.winner = null;
+    this.citizenStats = {};
     this._stopTimer();
     
     // Reset all players
@@ -249,7 +280,7 @@ export class MafiaGame {
       announcements: [],
     };
     this.rounds.push(this.currentRoundData);
-    this.phase = GamePhase.NIGHT_MAFIA;
+    this.phase = GamePhase.NIGHT_SETUP;
     this._emit('ROUND_STARTED', { round: this.currentRound });
     this._startPhaseTimer();
     this._notify();
@@ -261,7 +292,14 @@ export class MafiaGame {
 
   updateRoundConfig(updates) {
     if (!this.currentRoundData) return;
-    Object.assign(this.currentRoundData.config, updates);
+    const aliveCount = Math.max(1, this.getAlivePlayers().filter(p => p.id !== this.sageId).length);
+    for (const [k, v] of Object.entries(updates)) {
+      if (['mafiaKillCount', 'doctorHealCount', 'officerInvestigateCount'].includes(k)) {
+        this.currentRoundData.config[k] = Math.max(1, Math.min(aliveCount, Number(v) || 1));
+      } else {
+        this.currentRoundData.config[k] = v;
+      }
+    }
     this._notify();
   }
 
@@ -337,6 +375,8 @@ export class MafiaGame {
     if (!this.currentRoundData) return 0;
     const c = this.currentRoundData.config;
     switch (phase) {
+      case GamePhase.NIGHT_SETUP: return 0;
+      case GamePhase.NIGHT: return c.nightTimerSeconds || c.mafiaTimerSeconds || 60;
       case GamePhase.NIGHT_MAFIA: return c.mafiaTimerSeconds;
       case GamePhase.NIGHT_DOCTOR: return c.doctorTimerSeconds;
       case GamePhase.NIGHT_OFFICER: return c.officerTimerSeconds;
@@ -451,26 +491,37 @@ export class MafiaGame {
     if (!actor.isAlive) return { valid: false, error: 'Dead players cannot act' };
     if (actor.id === this.sageId) return { valid: false, error: 'Sage cannot perform actions' };
 
-    // Check correct phase for action
-    const expectedPhase = {
-      [ActionType.KILL]: GamePhase.NIGHT_MAFIA,
-      [ActionType.HEAL]: GamePhase.NIGHT_DOCTOR,
-      [ActionType.INVESTIGATE]: GamePhase.NIGHT_OFFICER,
-    }[actionType];
+    // Check correct phase & role for action
+    if (this.phase === GamePhase.NIGHT) {
+      const allowedRoles = {
+        [ActionType.KILL]: Role.MAFIA,
+        [ActionType.HEAL]: Role.DOCTOR,
+        [ActionType.INVESTIGATE]: Role.OFFICER,
+        [ActionType.SUSPECT]: Role.CITIZEN,
+      };
+      if (actor.role !== allowedRoles[actionType]) {
+        return { valid: false, error: `Your role cannot perform ${actionType}` };
+      }
+    } else {
+      const expectedPhase = {
+        [ActionType.KILL]: GamePhase.NIGHT_MAFIA,
+        [ActionType.HEAL]: GamePhase.NIGHT_DOCTOR,
+        [ActionType.INVESTIGATE]: GamePhase.NIGHT_OFFICER,
+      }[actionType];
 
-    if (this.phase !== expectedPhase) {
-      return { valid: false, error: `Cannot perform ${actionType} during ${this.phase}` };
-    }
+      if (this.phase !== expectedPhase) {
+        return { valid: false, error: `Cannot perform ${actionType} during ${this.phase}` };
+      }
 
-    // Check actor has the correct role
-    const expectedRole = {
-      [ActionType.KILL]: Role.MAFIA,
-      [ActionType.HEAL]: Role.DOCTOR,
-      [ActionType.INVESTIGATE]: Role.OFFICER,
-    }[actionType];
+      const expectedRole = {
+        [ActionType.KILL]: Role.MAFIA,
+        [ActionType.HEAL]: Role.DOCTOR,
+        [ActionType.INVESTIGATE]: Role.OFFICER,
+      }[actionType];
 
-    if (actor.role !== expectedRole) {
-      return { valid: false, error: `Your role cannot perform ${actionType}` };
+      if (actor.role !== expectedRole) {
+        return { valid: false, error: `Your role cannot perform ${actionType}` };
+      }
     }
 
     // Check target count
@@ -478,8 +529,9 @@ export class MafiaGame {
     const maxTargets = {
       [ActionType.KILL]: config.mafiaKillCount,
       [ActionType.HEAL]: config.doctorHealCount,
-      [ActionType.INVESTIGATE]: 1, // Always 1
-    }[actionType];
+      [ActionType.INVESTIGATE]: config.officerInvestigateCount || 1,
+      [ActionType.SUSPECT]: 1,
+    }[actionType] || 1;
 
     if (targetIds.length > maxTargets) {
       return { valid: false, error: `Can only select up to ${maxTargets} targets` };
@@ -534,6 +586,11 @@ export class MafiaGame {
     const player = this.getPlayer(playerId);
     if (!player || !player.isAlive) return true;
 
+    if (this.phase === GamePhase.NIGHT) {
+      const actions = this.currentRoundData ? this.currentRoundData.actions.filter(a => a.actorId === playerId) : [];
+      return actions.length > 0;
+    }
+
     const activeRole = PhaseActiveRole[this.phase];
     if (!activeRole || player.role !== activeRole) return true;
 
@@ -549,6 +606,10 @@ export class MafiaGame {
 
   /** Check if all active players have submitted their actions */
   allActionsSubmitted() {
+    if (this.phase === GamePhase.NIGHT) {
+      const activePlayers = this.getAlivePlayers().filter(p => p.id !== this.sageId);
+      return activePlayers.every(p => this.hasPlayerSubmitted(p.id));
+    }
     const activeRole = PhaseActiveRole[this.phase];
     if (!activeRole) return true;
     const activePlayers = this.getAliveByRole(activeRole).filter(p => p.id !== this.sageId);
@@ -601,6 +662,39 @@ export class MafiaGame {
         result: a.result,
       })),
     };
+
+    // Process Citizen Suspicions and compute accuracy stats
+    const suspectActions = this.getActionsOfType(ActionType.SUSPECT);
+    if (!this.citizenStats) this.citizenStats = {};
+
+    for (const a of suspectActions) {
+      const actor = this.getPlayer(a.actorId);
+      const target = this.getPlayer(a.targetId);
+      if (!actor || !target) continue;
+
+      const isCorrect = (target.role === Role.MAFIA);
+      if (!this.citizenStats[a.actorId]) {
+        this.citizenStats[a.actorId] = {
+          playerId: a.actorId,
+          playerName: actor.name,
+          total: 0,
+          correct: 0,
+          wrong: 0,
+          history: []
+        };
+      }
+      this.citizenStats[a.actorId].total++;
+      if (isCorrect) this.citizenStats[a.actorId].correct++;
+      else this.citizenStats[a.actorId].wrong++;
+
+      this.citizenStats[a.actorId].history.push({
+        round: this.currentRound,
+        targetId: a.targetId,
+        targetName: target.name,
+        targetRole: target.role,
+        isCorrect
+      });
+    }
 
     this._emit('NIGHT_RESOLVED', this.currentRoundData.resolution);
   }
@@ -821,11 +915,11 @@ export class MafiaGame {
       );
     }
     if (channel === ChatChannel.MAFIA) {
-      // Must be alive Mafia in GROUP mode, and during NIGHT_MAFIA phase
+      // Must be alive Mafia in GROUP mode, and during NIGHT or NIGHT_MAFIA phase
       return player.isAlive &&
         player.role === Role.MAFIA &&
         this.mafiaAwareness === AwarenessMode.GROUP &&
-        this.phase === GamePhase.NIGHT_MAFIA;
+        (this.phase === GamePhase.NIGHT || this.phase === GamePhase.NIGHT_MAFIA);
     }
     if (channel === ChatChannel.DEAD) {
       return !player.isAlive;
@@ -898,6 +992,7 @@ export class MafiaGame {
       state.mafiaCount = this.getMafiaCount();
       state.villageCount = this.getVillageCount();
       state.chatMessages = this.chatMessages;
+      state.citizenStats = Object.values(this.citizenStats || {});
       return state;
     }
 
@@ -910,6 +1005,7 @@ export class MafiaGame {
     state.myRole = player.role;
     state.myTeam = player.team;
     state.isAlive = player.isAlive;
+    state.citizenStats = Object.values(this.citizenStats || {});
     
     // Send filtered chat messages based on privacy
     state.chatMessages = { PUBLIC: this.chatMessages.PUBLIC || [] };
@@ -1027,14 +1123,46 @@ export class MafiaGame {
   _getEligibleTargets(player) {
     if (!this.currentRoundData) return [];
     const snapshot = this.currentRoundData.snapshot;
-    const activeRole = PhaseActiveRole[this.phase];
-
-    // Only active role gets targets
-    if (player.role !== activeRole) return [];
 
     let targets = snapshot
       .map(id => this.getPlayer(id))
       .filter(p => p && p.id !== this.sageId);
+
+    // In unified NIGHT phase:
+    if (this.phase === GamePhase.NIGHT) {
+      if (player.role === Role.DOCTOR) {
+        const prevRound = this.rounds[this.rounds.length - 2];
+        if (prevRound) {
+          const prevHeals = prevRound.actions.filter(
+            a => a.actorId === player.id && a.actionType === ActionType.HEAL
+          );
+          const prevTargetIds = prevHeals.map(a => a.targetId);
+          return targets.map(t => ({
+            id: t.id,
+            name: t.name,
+            disabled: prevTargetIds.includes(t.id),
+            disabledReason: prevTargetIds.includes(t.id) ? 'Healed last round' : null,
+          }));
+        }
+      } else if (player.role === Role.OFFICER || player.role === Role.CITIZEN) {
+        return targets.map(t => ({
+          id: t.id,
+          name: t.name,
+          disabled: t.id === player.id,
+          disabledReason: t.id === player.id ? 'Cannot select yourself' : null,
+        }));
+      }
+      return targets.map(t => ({
+        id: t.id,
+        name: t.name,
+        disabled: false,
+        disabledReason: null,
+      }));
+    }
+
+    // Legacy sequential phases:
+    const activeRole = PhaseActiveRole[this.phase];
+    if (player.role !== activeRole) return [];
 
     // Doctor: filter out consecutive target
     if (player.role === Role.DOCTOR) {

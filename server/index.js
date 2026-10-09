@@ -63,6 +63,9 @@ io.on('connection', (socket) => {
   // Join Game
   socket.on('joinGame', ({ roomCode, playerName, sessionToken: existingToken }, callback) => {
     try {
+      if (!roomCode) {
+        return callback({ success: false, error: 'Room code required' });
+      }
       const code = roomCode.toUpperCase();
       const game = roomManager.getGame(code);
 
@@ -73,7 +76,7 @@ io.on('connection', (socket) => {
       let sessionToken = existingToken;
       let player;
 
-      // Reconnection logic
+      // 1. Reconnection by existing sessionToken
       if (sessionToken) {
         const session = roomManager.getSession(sessionToken);
         if (session && session.roomCode === code) {
@@ -81,12 +84,37 @@ io.on('connection', (socket) => {
         }
       }
 
-      // New join logic
+      // 2. Reconnection by playerName (e.g. if user refreshed or rejoined with same name)
+      if (!player && playerName && playerName.trim()) {
+        const cleanName = playerName.trim().toLowerCase();
+        // Check Sage first
+        const sage = game.getPlayer(game.sageId);
+        if (sage && sage.name && sage.name.trim().toLowerCase() === cleanName) {
+          player = sage;
+        } else {
+          // Check players
+          const existing = game.players.find(
+            p => p.name && p.name.trim().toLowerCase() === cleanName
+          );
+          if (existing) {
+            player = existing;
+          }
+        }
+        if (player) {
+          sessionToken = roomManager.generateSessionToken();
+          roomManager.registerSession(sessionToken, code, player.id);
+        }
+      }
+
+      // 3. New player joining
       if (!player) {
         if (game.phase !== GamePhase.LOBBY) {
           return callback({ success: false, error: 'Game already in progress' });
         }
-        player = game.addPlayer(playerName);
+        if (!playerName || !playerName.trim()) {
+          return callback({ success: false, error: 'Please enter a name to join' });
+        }
+        player = game.addPlayer(playerName.trim());
         sessionToken = roomManager.generateSessionToken();
         roomManager.registerSession(sessionToken, code, player.id);
       }
@@ -96,7 +124,7 @@ io.on('connection', (socket) => {
       socket.data.roomCode = code;
       socket.data.playerId = player.id;
 
-      // Notify others in lobby if new player
+      // Notify others in lobby if new/reconnected player
       if (game.onStateChange) game.onStateChange();
 
       callback({
@@ -218,7 +246,11 @@ io.on('connection', (socket) => {
           votingTimerSeconds: payload.config.timers.VOTING,
         });
 
-        game.assignRoles(payload.roleCounts);
+        if (payload.assignmentMode === 'MANUAL' && payload.playerRoles) {
+          game.assignSpecificRoles(payload.playerRoles);
+        } else {
+          game.assignRoles(payload.roleCounts);
+        }
         game.startGame();
       } else if (command.type === 'ADVANCE_PHASE') {
         game.advancePhase();
@@ -234,26 +266,55 @@ io.on('connection', (socket) => {
         game.updateRoundConfig(command.payload);
       } else if (command.type === 'CANCEL_GAME') {
         game.cancelGame();
+      } else if (command.type === 'KICK_PLAYER') {
+        const targetId = command.payload.playerId;
+        if (game.phase === GamePhase.LOBBY) {
+          game.removePlayer(targetId);
+          roomManager.removeSessionByPlayerId(targetId);
+        }
       }
 
       if (callback) callback({ success: true });
     } catch (e) {
-      console.error('START_GAME ERROR:', e);
+      console.error('SAGE_COMMAND ERROR:', e);
       if (callback) callback({ success: false, error: e.message || e.toString() });
     }
   });
 
-  socket.on('disconnect', () => {
-    console.log(`Socket disconnected: ${socket.id}`);
-    const { roomCode, playerId } = socket.data;
+  socket.on('leaveRoom', (callback) => {
+    const { roomCode, playerId, sessionToken } = socket.data;
     if (roomCode && playerId) {
       const game = roomManager.getGame(roomCode);
       if (game) {
-        // We could mark player as offline in state here
-        // player.isConnected = false;
-        // broadcast stateUpdate
+        if (sessionToken) roomManager.removeSession(sessionToken);
+        socket.leave(roomCode);
+        delete socket.data.roomCode;
+        delete socket.data.playerId;
+        delete socket.data.sessionToken;
+
+        if (game.phase === GamePhase.LOBBY) {
+          try {
+            game.removePlayer(playerId);
+          } catch (e) {
+            console.error('Error removing player:', e);
+          }
+        } else {
+          const p = game.getPlayer(playerId);
+          if (p && p.isAlive) {
+            p.isAlive = false;
+            p.deathCause = DeathCause.LEFT_GAME;
+            game._notify();
+          }
+        }
+        if (game.onStateChange) game.onStateChange();
       }
     }
+    if (callback) callback({ success: true });
+  });
+
+  socket.on('disconnect', () => {
+    console.log(`Socket disconnected: ${socket.id}`);
+    // Do not delete player or session on temporary disconnect so reload and reconnection works seamlessly
   });
 });
 
