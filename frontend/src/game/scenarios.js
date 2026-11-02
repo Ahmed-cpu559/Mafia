@@ -16,18 +16,17 @@ const NAMES = ['Ahmed', 'Mohamed', 'Omar', 'Ali', 'Hassan', 'Khaled', 'Youssef',
 /* ─── Helper: quickly build a game with players ─── */
 function createBaseGame(playerCount = 6) {
   const game = new MafiaGame();
-  // Create a sage
-  const sage = game.addPlayer('Village Sage');
-  game.setSage(sage.id);
-  // Add players
-  for (let i = 0; i < playerCount; i++) {
-    game.addPlayer(NAMES[i] || `Player ${i + 1}`);
+  const host = game.addPlayer('Room Host');
+  game.setSage(host.id);
+  game.setModerator(host.id);
+  for (let i = 1; i < playerCount; i++) {
+    game.addPlayer(NAMES[i - 1] || `Player ${i + 1}`);
   }
   return game;
 }
 
 function getNonSagePlayers(game) {
-  return game.players.filter(p => p.id !== game.sageId);
+  return game.players;
 }
 
 /* ═══════════════════════════════════════════════════════

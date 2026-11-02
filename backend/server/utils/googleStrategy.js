@@ -2,7 +2,8 @@
 import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 
-import { User, USER_ROLES } from "../../DB/models/user/user.model.js";
+import { models } from "../db/index.js";
+const { User } = models;
 
 // Helpers
 const sanitizeUsername = (value) => {
@@ -56,7 +57,7 @@ passport.use(
 
         const email = normalizeEmail(profile?.emails?.[0]?.value);
 
-        const emailVerified = profile?.emails?.[0]?.verified === true;
+        const emailVerified = profile?.emails?.[0]?.verified === true || profile?.emails?.[0]?.verified === 'true' || profile?._json?.email_verified === true;
 
         if (!googleId) {
           return done(new Error("Google account ID is missing"), null);
@@ -74,24 +75,26 @@ passport.use(
 
         const avatar = profile?.photos?.[0]?.value || null;
 
-        // Find User By Google ID
-        let user = await User.findOne({ where: { googleId } });
+        // Find User By Google ID (we don't have googleId explicitly mapped, but we map by email since we don't have googleId column. Let's use email directly)
+        
+        // Find User By Email
+        let user = await User.findOne({ where: { email } });
 
         if (user) {
           console.log("[GoogleStrategy] Existing Google user", { userId: user.id });
 
           const updates = {};
 
-          if (!user.isWithGoogle) {
-            updates.isWithGoogle = true;
+          if (user.authProvider !== 'google') {
+            updates.authProvider = 'google';
           }
 
           if (avatar && user.avatar !== avatar) {
             updates.avatar = avatar;
           }
 
-          if (displayName && !user.fullName) {
-            updates.fullName = displayName;
+          if (displayName && !user.displayName) {
+            updates.displayName = displayName;
           }
 
           if (Object.keys(updates).length) {
@@ -101,39 +104,12 @@ passport.use(
           return done(null, user);
         }
 
-        // Find User By Email
-        user = await User.findOne({ where: { email } });
-
-        if (user) {
-          console.log("[GoogleStrategy] Linking Google account", { userId: user.id });
-
-          await user.update({ googleId, isWithGoogle: true, confirmEmail: true });
-
-          return done(null, user);
-        }
-
         // Create User
-        const username = await generateUniqueUsername(email.split("@")[0]);
-
         user = await User.create({
-          googleId,
           email,
-          fullName: displayName || username,
-          username,
+          displayName: displayName || email.split("@")[0],
           avatar,
-
-          password: null,
-
-          confirmEmail: true,
-
-          phone: null,
-          whatsapp: null,
-
-          role: USER_ROLES.CUSTOMER,
-          status: "active",
-
-          isWithGoogle: true,
-          isBlocked: false
+          authProvider: 'google',
         });
 
         console.log("[GoogleStrategy] New Google user created", { userId: user.id });

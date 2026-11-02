@@ -54,7 +54,7 @@ export class MafiaGame {
     this.code = generateGameCode();
 
     /* ── Fixed configuration (set before game start) ── */
-    this.gameMode = GameMode.SAGE_CONTROLLED;
+    this.gameMode = GameMode.AUTOMATED;
     this.mafiaAwareness = AwarenessMode.GROUP;
     this.doctorAwareness = AwarenessMode.INDIVIDUAL;
     this.officerAwareness = AwarenessMode.INDIVIDUAL;
@@ -62,6 +62,8 @@ export class MafiaGame {
 
     /* ── Players ── */
     this.players = []; // GamePlayer[]
+    this.moderatorId = null;
+    this.roomOwnerId = null;
     this.sageId = null;
 
     /* ── Game state ── */
@@ -77,11 +79,15 @@ export class MafiaGame {
     this.defaultRoundConfig = {
       mafiaKillCount: 1,
       doctorHealCount: 1,
-      mafiaTimerSeconds: 60,
-      doctorTimerSeconds: 30,
-      officerTimerSeconds: 30,
-      discussionTimerSeconds: 300,
-      votingTimerSeconds: 120,
+      officerInvestigateCount: 1,
+      mafiaTimerSeconds: 10,
+      doctorTimerSeconds: 10,
+      officerTimerSeconds: 10,
+      resolutionTimerSeconds: 3,
+      morningTimerSeconds: 5,
+      discussionTimerSeconds: 60,
+      votingTimerSeconds: 30,
+      voteResolutionTimerSeconds: 5,
     };
 
     /* ── Timer ── */
@@ -134,8 +140,14 @@ export class MafiaGame {
     this._emit('PLAYER_REMOVED', { playerId });
   }
 
-  setSage(playerId) {
+  setModerator(playerId) {
+    this.moderatorId = playerId;
+    this.roomOwnerId = playerId;
     this.sageId = playerId;
+  }
+
+  setSage(playerId) {
+    this.setModerator(playerId);
   }
 
   getPlayer(id) {
@@ -165,10 +177,9 @@ export class MafiaGame {
   /** Assign roles from a map: { MAFIA: 2, DOCTOR: 1, OFFICER: 1, CITIZEN: 2 } */
   assignRoles(roleCounts) {
     const totalRoles = Object.values(roleCounts).reduce((a, b) => a + b, 0);
-    const nonSagePlayers = this.players.filter(p => p.id !== this.sageId);
 
-    if (totalRoles !== nonSagePlayers.length) {
-      throw new Error(`Role count (${totalRoles}) doesn't match player count (${nonSagePlayers.length})`);
+    if (totalRoles !== this.players.length) {
+      throw new Error(`Role count (${totalRoles}) doesn't match player count (${this.players.length})`);
     }
     if (!roleCounts[Role.MAFIA] || roleCounts[Role.MAFIA] < 1) {
       throw new Error('At least 1 Mafia is required');
@@ -180,13 +191,13 @@ export class MafiaGame {
     }
 
     const shuffled = shuffle(roleList);
-    nonSagePlayers.forEach((p, i) => {
+    this.players.forEach((p, i) => {
       p.role = shuffled[i];
       p.team = RoleTeamMap[shuffled[i]];
     });
 
     this.phase = GamePhase.ROLE_ASSIGNMENT;
-    this._emit('ROLES_ASSIGNED', { players: nonSagePlayers.map(p => ({ id: p.id, name: p.name, role: p.role })) });
+    this._emit('ROLES_ASSIGNED', { players: this.players.map(p => ({ id: p.id, name: p.name, role: p.role })) });
     this._notify();
   }
 
@@ -204,8 +215,7 @@ export class MafiaGame {
 
   startGame() {
     if (this.phase !== GamePhase.ROLE_ASSIGNMENT) throw new Error('Roles must be assigned first');
-    const nonSage = this.players.filter(p => p.id !== this.sageId);
-    if (nonSage.some(p => !p.role)) throw new Error('Not all players have roles');
+    if (this.players.some(p => !p.role)) throw new Error('Not all players have roles');
     this._startNewRound();
     this._emit('GAME_STARTED', {});
     this._notify();
@@ -217,7 +227,7 @@ export class MafiaGame {
 
   _startNewRound() {
     this.currentRound++;
-    const alive = this.getAlivePlayers().filter(p => p.id !== this.sageId);
+    const alive = this.getAlivePlayers();
     this.currentRoundData = {
       roundNumber: this.currentRound,
       config: { ...this.defaultRoundConfig },
@@ -246,7 +256,12 @@ export class MafiaGame {
   }
 
   updateDefaultConfig(updates) {
-    Object.assign(this.defaultRoundConfig, updates);
+    if (!updates || typeof updates !== "object") return;
+    for (const [key, value] of Object.entries(updates)) {
+      if (value !== undefined && value !== null) {
+        this.defaultRoundConfig[key] = value;
+      }
+    }
   }
 
   /* ═══════════════════════════════════════════════════
@@ -258,23 +273,6 @@ export class MafiaGame {
 
     const idx = RoundPhaseOrder.indexOf(this.phase);
 
-    if (this.phase === GamePhase.NIGHT_RESOLUTION) {
-      this._resolveNight();
-      // Check village win after night (friendly fire possible)
-      const win = this._checkWinCondition();
-      if (win) {
-        this.winner = win;
-        this.phase = GamePhase.FINISHED;
-        this._emit('GAME_FINISHED', { winner: win });
-        this._stopTimer();
-        this._notify();
-        return;
-      }
-      this.phase = GamePhase.MORNING;
-      this._emit('PHASE_STARTED', { phase: this.phase });
-      this._notify();
-      return;
-    }
 
     if (this.phase === GamePhase.VOTE_RESOLUTION) {
       this._resolveVotes();
@@ -314,8 +312,11 @@ export class MafiaGame {
       case GamePhase.NIGHT_MAFIA: return c.mafiaTimerSeconds;
       case GamePhase.NIGHT_DOCTOR: return c.doctorTimerSeconds;
       case GamePhase.NIGHT_OFFICER: return c.officerTimerSeconds;
+      case GamePhase.NIGHT_RESOLUTION: return c.resolutionTimerSeconds || 3;
+      case GamePhase.MORNING: return c.morningTimerSeconds || 5;
       case GamePhase.DISCUSSION: return c.discussionTimerSeconds;
       case GamePhase.VOTING: return c.votingTimerSeconds;
+      case GamePhase.VOTE_RESOLUTION: return c.voteResolutionTimerSeconds || 5;
       default: return 0;
     }
   }
@@ -416,7 +417,6 @@ export class MafiaGame {
     const actor = this.getPlayer(actorId);
     if (!actor) return { valid: false, error: 'Player not found' };
     if (!actor.isAlive) return { valid: false, error: 'Dead players cannot act' };
-    if (actor.id === this.sageId) return { valid: false, error: 'Sage cannot perform actions' };
 
     // Check correct phase for action
     const expectedPhase = {
@@ -518,7 +518,7 @@ export class MafiaGame {
   allActionsSubmitted() {
     const activeRole = PhaseActiveRole[this.phase];
     if (!activeRole) return true;
-    const activePlayers = this.getAliveByRole(activeRole).filter(p => p.id !== this.sageId);
+    const activePlayers = this.getAliveByRole(activeRole);
     return activePlayers.every(p => this.hasPlayerSubmitted(p.id));
   }
 
@@ -554,6 +554,37 @@ export class MafiaGame {
       }
     }
 
+    // Determine public officer report on alternate nights (Odd rounds: announced, Even rounds: skipped)
+    const isAnnouncedRound = this.currentRound % 2 === 1;
+    let publicOfficerReport = null;
+
+    if (isAnnouncedRound) {
+      if (investigateActions.length > 0) {
+        const foundMafia = investigateActions.some(a => a.result === 'MAFIA');
+        publicOfficerReport = {
+          isAnnounced: true,
+          hasInvestigation: true,
+          isCorrect: foundMafia,
+          verdict: foundMafia ? 'CORRECT' : 'WRONG',
+          roundNumber: this.currentRound,
+        };
+      } else {
+        publicOfficerReport = {
+          isAnnounced: true,
+          hasInvestigation: false,
+          isCorrect: null,
+          verdict: 'NO_INVESTIGATION',
+          roundNumber: this.currentRound,
+        };
+      }
+    } else {
+      publicOfficerReport = {
+        isAnnounced: false,
+        reason: 'SKIPPED',
+        roundNumber: this.currentRound,
+      };
+    }
+
     // Store resolution
     this.currentRoundData.resolution = {
       killVotes,
@@ -566,7 +597,9 @@ export class MafiaGame {
         officerId: a.actorId,
         targetId: a.targetId,
         result: a.result,
+        revealed: true,
       })),
+      publicOfficerReport,
     };
 
     this._emit('NIGHT_RESOLVED', this.currentRoundData.resolution);
@@ -621,13 +654,11 @@ export class MafiaGame {
     const voter = this.getPlayer(voterId);
     if (!voter) return { success: false, error: 'Player not found' };
     if (!voter.isAlive) return { success: false, error: 'Dead players cannot vote' };
-    if (voter.id === this.sageId) return { success: false, error: 'Sage cannot vote' };
     if (this.phase !== GamePhase.VOTING) return { success: false, error: 'Not in voting phase' };
 
     const target = this.getPlayer(targetId);
     if (!target) return { success: false, error: 'Target not found' };
     if (!target.isAlive) return { success: false, error: 'Cannot vote for dead player' };
-    if (target.id === this.sageId) return { success: false, error: 'Cannot vote for Sage' };
 
     // Update or add vote
     const existing = this.currentRoundData.votes.findIndex(v => v.voterId === voterId);
@@ -665,7 +696,7 @@ export class MafiaGame {
   }
 
   allVotesSubmitted() {
-    const eligibleVoters = this.getAlivePlayers().filter(p => p.id !== this.sageId);
+    const eligibleVoters = this.getAlivePlayers();
     return eligibleVoters.every(p =>
       this.currentRoundData.votes.some(v => v.voterId === p.id)
     );
@@ -712,21 +743,21 @@ export class MafiaGame {
      ═══════════════════════════════════════════════════ */
 
   _checkWinCondition() {
-    const alivePlayers = this.getAlivePlayers().filter(p => p.id !== this.sageId);
+    const alivePlayers = this.getAlivePlayers();
     const mafiaCount = alivePlayers.filter(p => p.team === Team.MAFIA).length;
     const villageCount = alivePlayers.filter(p => p.team === Team.VILLAGE).length;
 
     if (mafiaCount === 0) return Team.VILLAGE;
-    if (mafiaCount > villageCount) return Team.MAFIA;
+    if (mafiaCount >= villageCount) return Team.MAFIA;
     return null; // Game continues
   }
 
   getMafiaCount() {
-    return this.getAlivePlayers().filter(p => p.id !== this.sageId && p.team === Team.MAFIA).length;
+    return this.getAlivePlayers().filter(p => p.team === Team.MAFIA).length;
   }
 
   getVillageCount() {
-    return this.getAlivePlayers().filter(p => p.id !== this.sageId && p.team === Team.VILLAGE).length;
+    return this.getAlivePlayers().filter(p => p.team === Team.VILLAGE).length;
   }
 
   /* ═══════════════════════════════════════════════════
@@ -813,7 +844,7 @@ export class MafiaGame {
    */
   getVisibleState(playerId) {
     const player = this.getPlayer(playerId);
-    const isSage = playerId === this.sageId;
+    const isRoomModerator = Boolean(playerId && (String(playerId) === String(this.moderatorId) || String(playerId) === String(this.sageId)));
 
     const state = {
       id: this.id,
@@ -830,36 +861,46 @@ export class MafiaGame {
       revealRoleAfterVoting: this.revealRoleAfterVoting,
       announcements: this.getRoundAnnouncements(),
       config: this.getRoundConfig(),
+      moderatorId: this.moderatorId || this.sageId,
+      isModerator: isRoomModerator,
     };
 
-    // Sage sees everything
-    if (isSage) {
-      state.isSage = true;
-      state.players = this.players.filter(p => p.id !== this.sageId).map(p => ({
-        ...p,
-        roleVisible: true,
-      }));
-      state.allActions = this.currentRoundData ? this.currentRoundData.actions : [];
-      state.resolution = this.currentRoundData?.resolution;
-      state.voteResult = this.currentRoundData?.voteResult;
-      state.votes = this.currentRoundData?.votes || [];
-      state.mafiaCount = this.getMafiaCount();
-      state.villageCount = this.getVillageCount();
+    // In LOBBY or ROLE_ASSIGNMENT:
+    if (this.phase === GamePhase.LOBBY || this.phase === GamePhase.ROLE_ASSIGNMENT) {
+      state.isSage = false;
+      state.players = this.players.map(p => {
+        const isMe = player && p.id === player.id;
+        const showRole = isRoomModerator || isMe;
+        return {
+          ...p,
+          role: showRole ? p.role : null,
+          team: showRole ? p.team : null,
+          isModerator: Boolean(p.id && (String(p.id) === String(this.moderatorId) || String(p.id) === String(this.sageId))),
+          roleVisible: showRole,
+        };
+      });
+      if (player) {
+        state.myId = player.id;
+        state.myName = player.name;
+        state.myRole = player.role;
+        state.myTeam = player.team;
+        state.isAlive = player.isAlive;
+      }
       return state;
     }
 
-    // Normal player
+    // ACTIVE GAMEPLAY: ALL players, including room creator, get normal player visibility
+    state.isSage = false;
     if (!player) return state;
 
-    state.isSage = false;
     state.myId = player.id;
     state.myName = player.name;
     state.myRole = player.role;
     state.myTeam = player.team;
     state.isAlive = player.isAlive;
 
-    // Build player list (what this player can see)
-    state.players = this.players.filter(p => p.id !== this.sageId).map(p => {
+    // Build player list: includes all players
+    state.players = this.players.map(p => {
       const visible = {
         id: p.id,
         name: p.name,
@@ -918,11 +959,13 @@ export class MafiaGame {
       state.myActions = this.currentRoundData.actions.filter(a => a.actorId === player.id);
     }
 
-    // Vote tally (visible during/after voting)
+    // Vote tally (revealed only in VOTE_RESOLUTION)
     if (this.phase === GamePhase.VOTING || this.phase === GamePhase.VOTE_RESOLUTION) {
-      state.voteTally = this.getVoteTally();
+      state.voteTally = this.phase === GamePhase.VOTE_RESOLUTION ? this.getVoteTally() : null;
       state.myVote = this.getPlayerVote(player.id);
       state.voteResult = this.currentRoundData?.voteResult;
+      state.votesCount = this.currentRoundData?.votes?.length || 0;
+      state.totalEligibleVoters = this.getAlivePlayers().length;
     }
 
     // Resolution info that players can see
@@ -937,15 +980,10 @@ export class MafiaGame {
         return { id, name: p?.name }; // No role revealed for mafia kills
       });
       state.nightSaves = this.currentRoundData.resolution.saves.length; // only count
+      state.publicOfficerReport = this.currentRoundData.resolution.publicOfficerReport;
       
       if (player.role === Role.OFFICER) {
-        state.myInvestigations = this.currentRoundData.resolution.investigations
-          .filter(i => i.officerId === player.id && i.revealed)
-          .map(i => ({
-            targetId: i.targetId,
-            targetName: this.getPlayer(i.targetId)?.name,
-            result: i.result
-          }));
+        state.myInvestigations = [];
       }
     }
 
@@ -955,7 +993,6 @@ export class MafiaGame {
     }
     if (this.phase === GamePhase.VOTING && player.isAlive) {
       state.eligibleVoteTargets = this.getAlivePlayers()
-        .filter(p => p.id !== this.sageId)
         .map(p => ({ id: p.id, name: p.name }));
     }
 
@@ -972,7 +1009,7 @@ export class MafiaGame {
 
     let targets = snapshot
       .map(id => this.getPlayer(id))
-      .filter(p => p && p.id !== this.sageId);
+      .filter(p => p && p.isAlive);
 
     // Doctor: filter out consecutive target
     if (player.role === Role.DOCTOR) {

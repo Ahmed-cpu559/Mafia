@@ -7,6 +7,7 @@ export const Team = Object.freeze({
 /* ─── Roles ─── */
 export const Role = Object.freeze({
   CITIZEN: 'CITIZEN',
+  VILLAGER: 'VILLAGER',
   DOCTOR: 'DOCTOR',
   OFFICER: 'OFFICER',
   MAFIA: 'MAFIA',
@@ -62,6 +63,7 @@ export const ChatChannel = Object.freeze({
 /* ─── Role → Team mapping ─── */
 export const RoleTeamMap = Object.freeze({
   [Role.CITIZEN]: Team.VILLAGE,
+  [Role.VILLAGER]: Team.VILLAGE,
   [Role.DOCTOR]: Team.VILLAGE,
   [Role.OFFICER]: Team.VILLAGE,
   [Role.MAFIA]: Team.MAFIA,
@@ -98,7 +100,8 @@ export const RoleTheme = Object.freeze({
   [Role.MAFIA]: { color: '#ef4444', bg: '#991b1b', glow: 'rgba(239,68,68,0.25)', icon: '🔪', label: 'Mafia' },
   [Role.DOCTOR]: { color: '#10b981', bg: '#065f46', glow: 'rgba(16,185,129,0.25)', icon: '💊', label: 'Doctor' },
   [Role.OFFICER]: { color: '#3b82f6', bg: '#1e3a5f', glow: 'rgba(59,130,246,0.25)', icon: '🔍', label: 'Officer' },
-  [Role.CITIZEN]: { color: '#94a3b8', bg: '#334155', glow: 'rgba(148,163,184,0.15)', icon: '👤', label: 'Citizen' },
+  [Role.CITIZEN]: { color: '#94a3b8', bg: '#334155', glow: 'rgba(148,163,184,0.15)', icon: '👤', label: 'Villager' },
+  [Role.VILLAGER]: { color: '#94a3b8', bg: '#334155', glow: 'rgba(148,163,184,0.15)', icon: '👤', label: 'Villager' },
 });
 
 /* ─── Visual themes for phases ─── */
@@ -121,3 +124,64 @@ export const TeamLabel = Object.freeze({
   [Team.VILLAGE]: 'Village',
   [Team.MAFIA]: 'Mafia',
 });
+
+/* ─── Room Visibility ─── */
+export const RoomVisibility = Object.freeze({
+  PUBLIC: 'PUBLIC',
+  PRIVATE: 'PRIVATE',
+  INVITE_ONLY: 'INVITE_ONLY',
+});
+
+/* ─── Timeline Events ─── */
+export const TimelineEventType = Object.freeze({
+  ROOM_CREATED: 'ROOM_CREATED',
+  PLAYER_JOINED: 'PLAYER_JOINED',
+  PLAYER_LEFT: 'PLAYER_LEFT',
+  ROLES_ASSIGNED: 'ROLES_ASSIGNED',
+  GAME_STARTED: 'GAME_STARTED',
+  ROUND_STARTED: 'ROUND_STARTED',
+  PHASE_STARTED: 'PHASE_STARTED',
+  ACTION_SUBMITTED: 'ACTION_SUBMITTED',
+  NIGHT_RESOLVED: 'NIGHT_RESOLVED',
+  VOTE_SUBMITTED: 'VOTE_SUBMITTED',
+  VOTE_RESOLVED: 'VOTE_RESOLVED',
+  PLAYER_ELIMINATED: 'PLAYER_ELIMINATED',
+  TIMER_EXTENDED: 'TIMER_EXTENDED',
+  GAME_FINISHED: 'GAME_FINISHED',
+});
+
+/* ─── Notification Severity ─── */
+export const NotificationSeverity = Object.freeze({
+  INFO: 'INFO',
+  SUCCESS: 'SUCCESS',
+  WARNING: 'WARNING',
+  ERROR: 'ERROR',
+  URGENT: 'URGENT',
+});
+
+/* ─── Default Centralized Game Rules ─── */
+export const DEFAULT_GAME_RULES = Object.freeze({
+  minPlayers: 5,
+  maxPlayers: 20,
+  timers: {
+    NIGHT_MAFIA: 10,
+    NIGHT_DOCTOR: 10,
+    NIGHT_OFFICER: 10,
+    DISCUSSION: 60,
+    VOTING: 30,
+  },
+  doctor: {
+    canSelfHeal: true,
+    consecutiveProtection: false,
+  },
+  voting: {
+    allowSelfVote: false,
+    tieRule: 'NO_ELIMINATION',
+    revealRole: true,
+  },
+  mafia: {
+    killCount: 1,
+    communication: true,
+  },
+});
+

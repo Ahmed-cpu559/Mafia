@@ -1,145 +1,246 @@
 /**
  * Game View orchestrator
- * Combines Sage and Player views and adds the perspective switcher.
+ * Combines Moderator and Player views and dispatches authoritative socket actions.
  */
 
-import { renderSageDash } from './sage.js';
 import { renderPlayerView } from './player.js';
+import { showToast, playSound } from './components.js';
+import { ActionType, Role } from '../../../shared/enums.js';
 import { t } from '../i18n.js';
 
 export function renderGame(container, app) {
   const state = app.gameState;
-  if (!state) { app.screen = 'home'; app.render(); return; }
-
-  // Which perspective to show?
-  const isSage = state.isSage;
-  
-  // Render view
-  let viewHtml = '';
-  if (isSage) {
-    viewHtml = renderSageDash(app);
-  } else {
-    viewHtml = renderPlayerView(app);
+  if (!state) {
+    app.screen = 'home';
+    app.render();
+    return;
   }
 
-  container.innerHTML = `
-    ${viewHtml}
-  `;
+  // In active gameplay, every player (including room creator) sees the normal player view
+  container.innerHTML = renderPlayerView(app);
 }
 
-// Handlers attached globally
+/* ═══════════════════════════════════════════════════════════════
+   GLOBAL GAME HANDLERS
+   ═══════════════════════════════════════════════════════════════ */
+
 window._exitGame = () => {
+  const app = window.__MAFIA_APP__;
+  if (app && app.socket) {
+    app.socket.emit('leaveGame');
+  }
   sessionStorage.removeItem('mafia_session_token');
   sessionStorage.removeItem('mafia_room_code');
-  window.__MAFIA_APP__.gameState = null;
-  window.__MAFIA_APP__.screen = 'home';
-  window.__MAFIA_APP__.render();
+  if (app) {
+    app.gameState = null;
+    app.screen = 'home';
+    app.render();
+  }
 };
 
-  // Player Actions (Night)
-  window._toggleTarget = (id, max) => {
-    const app = window.__MAFIA_APP__;
-    const sel = app.selectedTargets || [];
-    if (sel.includes(id)) {
-      app.selectedTargets = sel.filter(x => x !== id);
-    } else {
-      if (sel.length < max) {
-        app.selectedTargets = [...sel, id];
-      } else if (max === 1) {
-        app.selectedTargets = [id]; // auto replace if only 1 target allowed
-      }
-    }
-    app.render();
+window._copyRoomCode = (code) => {
+  if (!code) return;
+  const notifySuccess = () => {
+    showToast('Room Code copied to clipboard!', 'success');
+    playSound('tick');
   };
 
-  window._submitAction = (type) => {
-    const app = window.__MAFIA_APP__;
-    const sel = app.selectedTargets || [];
-    if (sel.length === 0) return;
-    app.socket.emit('playerAction', { type, targetIds: sel }, (res) => {
-      if (!res.success) {
-        alert(res.error || 'Invalid action');
-      }
+  if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(code).then(notifySuccess).catch(() => {
+      fallbackCopy(code, notifySuccess);
     });
-    app.selectedTargets = [];
-  };
+  } else {
+    fallbackCopy(code, notifySuccess);
+  }
+};
 
-  window._retractAction = () => {
-    const app = window.__MAFIA_APP__;
-    if (app.gameState && app.gameState.myActions) {
-      app.gameState.myActions = [];
+function fallbackCopy(code, onSuccess) {
+  try {
+    const textArea = document.createElement('textarea');
+    textArea.value = code;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-9999px';
+    textArea.style.top = '-9999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    const successful = document.execCommand('copy');
+    textArea.remove();
+    if (successful && onSuccess) onSuccess();
+    else showToast(`Room Code: ${code}`, 'info');
+  } catch (e) {
+    showToast(`Room Code: ${code}`, 'info');
+  }
+}
+
+window._shareRoomCode = (code) => {
+  if (typeof navigator !== 'undefined' && navigator.share) {
+    navigator.share({
+      title: 'Join my Mafia Game!',
+      text: `Join my Mafia game with room code: ${code}`,
+      url: window.location.href,
+    }).catch(() => {});
+  } else {
+    window._copyRoomCode(code);
+  }
+};
+
+// Target Selection
+window._toggleTarget = (id, max = 1) => {
+  const app = window.__MAFIA_APP__;
+  if (!app) return;
+  const sel = app.selectedTargets || [];
+  if (sel.includes(id)) {
+    app.selectedTargets = sel.filter(x => x !== id);
+  } else {
+    if (sel.length < max) {
+      app.selectedTargets = [...sel, id];
+    } else if (max === 1) {
+      app.selectedTargets = [id]; // auto-replace single target
     }
-    app.render();
-  };
+  }
+  playSound('tick');
+  app.render();
+};
 
-  // Voting
-  window._submitVote = (targetId) => {
-    window.__MAFIA_APP__.socket.emit('submitVote', { targetId });
-  };
+// Submit Night Action (mafia:kill, doctor:protect, officer:investigate)
+window._submitRoleAction = () => {
+  const app = window.__MAFIA_APP__;
+  if (!app || !app.gameState) return;
+  const sel = app.selectedTargets || [];
+  if (sel.length === 0) {
+    showToast('Please select a target first', 'warning');
+    return;
+  }
 
-  // Chat
-  window._sendChat = (channel) => {
-    const app = window.__MAFIA_APP__;
-    const input = document.getElementById('chat-input');
-    if (!input || !input.value.trim()) return;
-    app.socket.emit('sendChat', { channel, message: input.value.trim() });
-    input.value = '';
-    setTimeout(() => {
-      const msgs = document.getElementById('chat-messages');
-      if (msgs) msgs.scrollTop = msgs.scrollHeight;
-    }, 50);
-  };
+  const myRole = app.gameState.myRole;
+  const targetId = sel[0];
+  const targetIds = sel;
 
-  // Sage Controls
-  window._sageAdvancePhase = () => {
-    window.__MAFIA_APP__.socket.emit('sageCommand', { type: 'ADVANCE_PHASE' });
-  };
+  let eventName = 'playerAction';
+  let payload = { type: ActionType.KILL, targetIds };
 
-  window._sageExtendTimer = (sec) => {
-    window.__MAFIA_APP__.socket.emit('sageCommand', { type: 'EXTEND_TIMER', payload: { seconds: sec } });
-  };
+  if (myRole === Role.MAFIA) {
+    eventName = 'mafia:kill';
+    payload = { targetId, targetIds };
+  } else if (myRole === Role.DOCTOR) {
+    eventName = 'doctor:protect';
+    payload = { targetId, targetIds };
+  } else if (myRole === Role.OFFICER) {
+    eventName = 'officer:investigate';
+    payload = { targetId, targetIds };
+  }
 
-  window._sageResetRound = () => {
-    // Not supported in multiplayer MVP
-  };
-
-  window._sageRevealInvestigation = (officerId) => {
-    window.__MAFIA_APP__.socket.emit('sageCommand', { type: 'REVEAL_INVESTIGATION', payload: { targetId: officerId } });
-  };
-
-  window._sageForceWin = (team) => {
-    window.__MAFIA_APP__.socket.emit('sageCommand', { type: 'SET_WINNER', payload: { team } });
-  };
-  
-  window._sageSetChat = (ch) => {
-    const app = window.__MAFIA_APP__;
-    app.activeChatChannel = ch;
-    app.render();
-  };
-
-  window._setAnnouncement = (text) => {
-    const ta = document.getElementById('announcement-text');
-    if (ta) ta.value = text;
-  };
-
-  window._sendAnnouncement = () => {
-    const app = window.__MAFIA_APP__;
-    const ta = document.getElementById('announcement-text');
-    if (!ta || !ta.value.trim()) return;
-    app.socket.emit('sageCommand', { type: 'ANNOUNCE', payload: { text: ta.value.trim() } });
-    ta.value = '';
-  };
-
-  window._sageUpdateConfig = (key, delta) => {
-    const app = window.__MAFIA_APP__;
-    if (!app.gameState || !app.gameState.config) return;
-    const newVal = app.gameState.config[key] + delta;
-    if (newVal < 0) return;
-    app.socket.emit('sageCommand', { type: 'UPDATE_CONFIG', payload: { [key]: newVal } });
-  };
-
-  window._sageCancelGame = () => {
-    if (confirm('Are you sure you want to cancel the game and return everyone to the lobby?')) {
-      window.__MAFIA_APP__.socket.emit('sageCommand', { type: 'CANCEL_GAME' });
+  app.socket.emit(eventName, payload, (res) => {
+    if (res && res.success === false) {
+      showToast(res.error || 'Action failed', 'error');
+    } else {
+      playSound('vote');
+      showToast('Action confirmed by server!', 'success');
     }
-  };
+  });
+
+  app.selectedTargets = [];
+};
+
+window._retractAction = () => {
+  const app = window.__MAFIA_APP__;
+  if (!app) return;
+  if (app.gameState && app.gameState.myActions) {
+    app.gameState.myActions = [];
+  }
+  app.selectedTargets = [];
+  playSound('tick');
+  app.render();
+};
+
+// Submit Vote
+window._submitVote = (targetId) => {
+  const app = window.__MAFIA_APP__;
+  if (!app || !app.socket) return;
+
+  // Cannot vote for self as per backend rules
+  if (app.gameState && targetId === app.gameState.myId) {
+    showToast('You cannot vote for yourself', 'warning');
+    return;
+  }
+
+  app.socket.emit('submitVote', { targetId }, (res) => {
+    if (res && res.success === false) {
+      showToast(res.error || 'Failed to submit vote', 'error');
+    } else {
+      playSound('vote');
+      showToast('Vote registered!', 'success');
+    }
+  });
+};
+
+// Send Realtime Chat
+window._sendChat = (channel = 'PUBLIC') => {
+  const app = window.__MAFIA_APP__;
+  if (!app || !app.socket) return;
+  const input = document.getElementById('chat-input');
+  if (!input || !input.value.trim()) return;
+
+  const msg = input.value.trim();
+  app.socket.emit('sendChat', { channel, message: msg }, (res) => {
+    if (res && res.success === false) {
+      showToast(res.error || 'Message rejected', 'error');
+    }
+  });
+
+  input.value = '';
+  setTimeout(() => {
+    const msgs = document.getElementById('chat-messages');
+    if (msgs) msgs.scrollTop = msgs.scrollHeight;
+  }, 50);
+};
+
+// Moderator Commands (Advance Phase, Extend Timer, Broadcast Announcement, Cancel Game)
+window._moderatorCommand = (type, payload = {}) => {
+  const app = window.__MAFIA_APP__;
+  if (!app || !app.socket) return;
+
+  app.socket.emit('moderator:command', { type, payload }, (res) => {
+    if (res && res.success === false) {
+      // Fallback to legacy sageCommand
+      app.socket.emit('sageCommand', { type, payload }, (fallbackRes) => {
+        if (fallbackRes && fallbackRes.success === false) {
+          showToast(fallbackRes.error || 'Command failed', 'error');
+        } else {
+          showToast(`Executed: ${type}`, 'success');
+        }
+      });
+    } else {
+      playSound('tick');
+      showToast(`Command executed`, 'success');
+    }
+  });
+};
+
+// Legacy bindings for compatibility
+window._sageAdvancePhase = () => window._moderatorCommand('ADVANCE_PHASE');
+window._sageExtendTimer = (sec) => window._moderatorCommand('EXTEND_TIMER', { seconds: sec });
+window._sageCancelGame = () => {
+  if (confirm('Are you sure you want to cancel the game and return everyone to the lobby?')) {
+    window._moderatorCommand('CANCEL_GAME');
+  }
+};
+window._sageSetChat = (channel) => {
+  const app = window.__MAFIA_APP__;
+  if (app) {
+    app.activeChatChannel = channel;
+    playSound('tick');
+    app.render();
+  }
+};
+window._setAnnouncement = (text) => {
+  const ta = document.getElementById('announcement-text');
+  if (ta) ta.value = text;
+};
+window._sendAnnouncement = () => {
+  const ta = document.getElementById('announcement-text');
+  if (!ta || !ta.value.trim()) return;
+  window._moderatorCommand('ANNOUNCE', { text: ta.value.trim() });
+  ta.value = '';
+};

@@ -4,12 +4,15 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
-    "start": "node server/index.js"
+    "dev:backend": "node backend/server/index.js",
+    "dev:frontend": "vite frontend",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "build": "vite build frontend",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js backend/server/tests/engine.test.js",
+    "start": "node backend/server/index.js"
   },
   "devDependencies": {
+    "concurrently": "^10.0.5",
     "jest": "^30.5.2",
     "vite": "^5.4.0"
   },
@@ -18,7 +21,13 @@
     "dotenv": "^18.0.5",
     "express": "^5.2.1",
     "express-rate-limit": "^8.7.0",
+    "jsonwebtoken": "^9.0.3",
     "mysql2": "^3.24.5",
+    "nodemailer": "^10.0.16",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
+    "sequelize": "^6.37.8",
+    "sequelize-cli": "^6.6.5",
     "socket.io": "^4.8.4",
     "socket.io-client": "^4.8.4"
   }

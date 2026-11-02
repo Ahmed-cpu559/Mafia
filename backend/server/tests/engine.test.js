@@ -1,6 +1,6 @@
 import { jest } from '@jest/globals';
 import { MafiaGame } from '../engine/MafiaGame.js';
-import { GameMode, AwarenessMode, Role, Team, GamePhase } from '../../shared/enums.js';
+import { GameMode, AwarenessMode, Role, Team, GamePhase } from '../../../shared/enums.js';
 
 describe('MafiaGame Engine', () => {
   let game;
@@ -8,7 +8,7 @@ describe('MafiaGame Engine', () => {
   beforeEach(() => {
     game = new MafiaGame();
     game.code = 'TEST';
-    game.gameMode = GameMode.SAGE_CONTROLLED;
+    game.gameMode = GameMode.AUTOMATED;
     game.config = {
       mafiaKillCount: 1,
       doctorHealCount: 1,
@@ -20,11 +20,12 @@ describe('MafiaGame Engine', () => {
       timers: {}
     };
 
-    const sage = game.addPlayer('Sage');
-    game.setSage(sage.id);
+    // Creator is player 1 and room moderator
+    const creator = game.addPlayer('Creator');
+    game.setModerator(creator.id);
 
-    // Add 6 players
-    for (let i = 1; i <= 6; i++) {
+    // Add 5 more players (total 6)
+    for (let i = 2; i <= 6; i++) {
       game.addPlayer(`Player ${i}`);
     }
 
@@ -32,7 +33,7 @@ describe('MafiaGame Engine', () => {
       [Role.MAFIA]: 2,
       [Role.DOCTOR]: 1,
       [Role.OFFICER]: 1,
-      [Role.CITIZEN]: 2
+      [Role.VILLAGER]: 2
     });
     
     game.startGame();
@@ -42,16 +43,18 @@ describe('MafiaGame Engine', () => {
     game.destroy();
   });
 
-  test('should assign roles correctly', () => {
+  test('should assign roles correctly to all 6 players including creator', () => {
     const mafia = game.getAliveByRole(Role.MAFIA);
     const doctor = game.getAliveByRole(Role.DOCTOR);
     const officer = game.getAliveByRole(Role.OFFICER);
-    const citizen = game.getAliveByRole(Role.CITIZEN);
+    const villager = game.getAliveByRole(Role.VILLAGER);
     
     expect(mafia.length).toBe(2);
     expect(doctor.length).toBe(1);
     expect(officer.length).toBe(1);
-    expect(citizen.length).toBe(2);
+    expect(villager.length).toBe(2);
+    expect(game.players.length).toBe(6);
+    expect(game.players.every(p => p.role !== null)).toBe(true);
   });
 
   test('should advance phases correctly', () => {
@@ -63,7 +66,7 @@ describe('MafiaGame Engine', () => {
   test('voting tie resolves to nobody eliminated', () => {
     // Jump to voting
     game.phase = GamePhase.VOTING;
-    const players = game.getAlivePlayers().filter(p => p.id !== game.sageId);
+    const players = game.getAlivePlayers();
     
     // 3 votes for p1, 3 votes for p2
     game.submitVote(players[0].id, players[1].id);

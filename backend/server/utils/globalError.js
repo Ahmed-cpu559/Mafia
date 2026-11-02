@@ -1,6 +1,6 @@
 // src/utils/GlobalError.js
-import { sanitizeForLog } from "./logger.js";
-import slug from "./slug.js";
+const sanitizeForLog = (obj) => obj;
+const slug = (str) => String(str).replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
 
 const DEFAULT_STATUS_CODE = 500;
 
